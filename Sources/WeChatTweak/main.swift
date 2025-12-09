@@ -13,8 +13,14 @@ extension Tweak {
     struct Versions: AsyncParsableCommand {
         static let configuration = CommandConfiguration(abstract: "List all supported WeChat versions")
 
+        @OptionGroup
+        var options: Tweak.Options
+
         mutating func run() async throws {
-            try await Config.load().forEach({ print($0.version) })
+            print("------ Current version ------")
+            print(try await Command.version(app: options.app) ?? "unknown")
+            print("------ Supported versions ------")
+            try await Config.load(url: options.config).forEach({ print($0.version) })
             Darwin.exit(EXIT_SUCCESS)
         }
     }
@@ -23,28 +29,64 @@ extension Tweak {
 // MARK: Patch
 extension Tweak {
     struct Patch: AsyncParsableCommand {
-        enum Error: LocalizedError {
-            case invalidApp
-            case invalidConfig
-            case invalidVersion
-            case unsupportedVersion
-
-            var errorDescription: String? {
-                switch self {
-                case .invalidApp:
-                    return "Invalid app path"
-                case .invalidConfig:
-                    return "Invalid patch config"
-                case .invalidVersion:
-                    return "Invalid app version"
-                case .unsupportedVersion:
-                    return "Unsupported WeChat version"
-                }
-            }
-        }
-
         static let configuration = CommandConfiguration(abstract: "Patch WeChat.app")
 
+        @OptionGroup
+        var options: Tweak.Options
+
+        mutating func run() async throws {
+            print("------ Version ------")
+            let version = try await Command.version(app: options.app)
+            print("WeChat version: \(version ?? "unknown")")
+
+            print("------ Config ------")
+            guard let config = (try await Config.load(url: options.config)).first(where: { $0.version == version }) else {
+                throw Error.unsupportedVersion
+            }
+            print("Matched config: \(config)")
+
+            print("------ Patch ------")
+            try await Command.patch(
+                app: options.app,
+                config: config
+            )
+            print("Done!")
+
+            print("------ Resign ------")
+            try await Command.resign(
+                app: options.app
+            )
+            print("Done!")
+
+            Darwin.exit(EXIT_SUCCESS)
+        }
+    }
+
+}
+
+// MARK: Tweak
+struct Tweak: AsyncParsableCommand {
+    enum Error: LocalizedError {
+        case invalidApp
+        case invalidConfig
+        case invalidVersion
+        case unsupportedVersion
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidApp:
+                return "Invalid app path"
+            case .invalidConfig:
+                return "Invalid patch config"
+            case .invalidVersion:
+                return "Invalid app version"
+            case .unsupportedVersion:
+                return "Unsupported WeChat version"
+            }
+        }
+    }
+
+    struct Options: ParsableArguments {
         @Option(
             name: .shortAndLong,
             help: "Path of WeChat.app",
@@ -71,42 +113,9 @@ extension Tweak {
                 }
             }
         )
-        var config: URL = Config.default
-
-        mutating func run() async throws {
-            print("------ Version ------")
-            guard let version = try await Command.version(app: self.app) else {
-                throw Error.invalidVersion
-            }
-            print("WeChat version: \(version)")
-
-            print("------ Config ------")
-            guard let config = (try await Config.load()).first(where: { $0.version == version }) else {
-                throw Error.unsupportedVersion
-            }
-            print("Matched config: \(config)")
-
-            print("------ Patch ------")
-            try await Command.patch(
-                app: self.app,
-                config: config
-            )
-            print("Done!")
-
-            print("------ Resign ------")
-            try await Command.resign(
-                app: self.app
-            )
-            print("Done!")
-
-            Darwin.exit(EXIT_SUCCESS)
-        }
+        var config: URL = URL(string:"https://raw.githubusercontent.com/sunnyyoung/WeChatTweak/refs/heads/master/config.json")!
     }
 
-}
-
-// MARK: Tweak
-struct Tweak: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "wechattweak",
         abstract: "A command-line tool for tweaking WeChat.",
